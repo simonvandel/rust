@@ -609,7 +609,6 @@ fn merge_codegen_units<'tcx>(tcx: TyCtxt<'_, 'tcx, 'tcx>,
 fn place_inlined_mono_items<'tcx>(initial_partitioning: PreInliningPartitioning<'tcx>,
                                   inlining_map: &InliningMap<'tcx>)
                                   -> PostInliningPartitioning<'tcx> {
-    let mut new_partitioning = Vec::new();
     let mut mono_item_placements = FxHashMap::default();
 
     let PreInliningPartitioning {
@@ -617,6 +616,8 @@ fn place_inlined_mono_items<'tcx>(initial_partitioning: PreInliningPartitioning<
         roots,
         internalization_candidates,
     } = initial_partitioning;
+
+    let mut new_partitioning = Vec::with_capacity(initial_cgus.len());
 
     let single_codegen_unit = initial_cgus.len() == 1;
 
