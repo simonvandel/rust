@@ -207,7 +207,7 @@ fn fat_lto(cgcx: &CodegenContext<LlvmCodegenBackend>,
         .max()
         .expect("must be codegen'ing at least one module");
     let module = modules.remove(costliest_module);
-    let mut serialized_bitcode = Vec::new();
+    let mut serialized_bitcode = Vec::with_capacity(modules.len());
     {
         let (llcx, llmod) = {
             let llvm = &module.module_llvm;
