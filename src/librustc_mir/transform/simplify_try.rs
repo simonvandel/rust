@@ -14,10 +14,11 @@ use itertools::Itertools as _;
 use rustc_index::{bit_set::BitSet, vec::IndexVec};
 use rustc_middle::mir::visit::{NonUseContext, PlaceContext, Visitor};
 use rustc_middle::mir::*;
-use rustc_middle::ty::{List, Ty, TyCtxt};
+use rustc_middle::ty::{self, List, Ty, TyCtxt};
 use rustc_target::abi::VariantIdx;
 use std::iter::{Enumerate, Peekable};
 use std::slice::Iter;
+use ty::layout::TyAndLayout;
 
 /// Simplifies arms of form `Variant(x) => Variant(x)` to just a move.
 ///
@@ -273,7 +274,12 @@ fn get_arm_identity_info<'a, 'tcx>(
     })
 }
 
+fn layout_of<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> Option<TyAndLayout<'tcx>> {
+    tcx.layout_of(ty::ParamEnv::reveal_all().and(ty)).ok()
+}
+
 fn optimization_applies<'tcx>(
+    tcx: TyCtxt<'tcx>,
     opt_info: &ArmIdentityInfo<'tcx>,
     local_decls: &IndexVec<Local, LocalDecl<'tcx>>,
     local_uses: &IndexVec<Local, usize>,
@@ -288,10 +294,6 @@ fn optimization_applies<'tcx>(
     } else if opt_info.vf_s0 != opt_info.vf_s1 {
         trace!("NO: the field-and-variant information do not match");
         return false;
-    } else if local_decls[opt_info.local_0].ty != local_decls[opt_info.local_1].ty {
-        // FIXME(Centril,oli-obk): possibly relax to same layout?
-        trace!("NO: source and target locals have different types");
-        return false;
     } else if (opt_info.local_0, opt_info.vf_s0.var_idx)
         != (opt_info.set_discr_local, opt_info.set_discr_var_idx)
     {
@@ -304,6 +306,19 @@ fn optimization_applies<'tcx>(
         trace!("NO: no assignments found");
         return false;
     }
+
+    let layout_and_type_lhs = layout_of(tcx, local_decls[opt_info.local_0].ty);
+    let layout_and_type_rhs = layout_of(tcx, local_decls[opt_info.local_1].ty);
+    let layouts_match = layout_and_type_lhs.map(|x|x.layout) == layout_and_type_rhs.map(|x|x.layout);
+    if !layouts_match
+    {
+        trace!("NO: source and target locals have different layouts");
+        return false;
+    }
+
+    // TODO: if the layouts match, but the types do not, we need to insert a conversion so that the MIR does not contain invalid types
+    let must_insert_type_conversion = layout_and_type_lhs.map(|x|x.ty) != layout_and_type_rhs.map(|x|x.ty);
+
     let mut last_assigned_to = opt_info.field_tmp_assignments[0].1;
     let source_local = last_assigned_to;
     for (l, r) in &opt_info.field_tmp_assignments {
@@ -379,7 +394,7 @@ impl<'tcx> MirPass<'tcx> for SimplifyArmIdentity {
                 get_arm_identity_info(&bb.statements, local_decls.len(), debug_info)
             {
                 trace!("got opt_info = {:#?}", opt_info);
-                if !optimization_applies(&opt_info, local_decls, &local_uses, &debug_info) {
+                if !optimization_applies(tcx, &opt_info, local_decls, &local_uses, &debug_info) {
                     debug!("optimization skipped for {:?}", source);
                     continue;
                 }
