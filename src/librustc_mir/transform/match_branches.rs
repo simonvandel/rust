@@ -117,6 +117,7 @@ impl<'tcx> MirPass<'tcx> for MatchBranchSimplification {
                                 rustc_span::DUMMY_SP,
                             );
                             let op = if f_b { BinOp::Eq } else { BinOp::Ne };
+                            // TODO denne kan gøres smartere så den ikke laver Ne(place, false)
                             let rhs = Rvalue::BinaryOp(op, Operand::Copy(discr.clone()), const_cmp);
                             Statement {
                                 source_info: f.source_info,
