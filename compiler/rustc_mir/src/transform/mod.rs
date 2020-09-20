@@ -36,6 +36,7 @@ pub mod no_landing_pads;
 pub mod nrvo;
 pub mod promote_consts;
 pub mod qualify_min_const_fn;
+pub mod remove_deref;
 pub mod remove_noop_landing_pads;
 pub mod required_consts;
 pub mod rustc_peek;
@@ -463,6 +464,7 @@ fn run_optimization_passes<'tcx>(
         &match_branches::MatchBranchSimplification,
         // inst combine is after MatchBranchSimplification to clean up Ne(_1, false)
         &instcombine::InstCombine,
+        &remove_deref::RemoveDeref,
         &const_prop::ConstProp,
         &simplify_branches::SimplifyBranches::new("after-const-prop"),
         &simplify_comparison_integral::SimplifyComparisonIntegral,

@@ -1,4 +1,4 @@
-// EMIT_MIR inst_combine_deref.simple_opt.InstCombine.diff
+// EMIT_MIR remove_deref.simple_opt.RemoveDeref.diff
 fn simple_opt() -> u64 {
     let x = 5;
     let y = &x;
@@ -6,7 +6,7 @@ fn simple_opt() -> u64 {
     z
 }
 
-// EMIT_MIR inst_combine_deref.deep_opt.InstCombine.diff
+// EMIT_MIR remove_deref.deep_opt.RemoveDeref.diff
 fn deep_opt() -> (u64, u64, u64) {
     let x1 = 1;
     let x2 = 2;
@@ -25,7 +25,7 @@ struct S {
     b: u64,
 }
 
-// EMIT_MIR inst_combine_deref.opt_struct.InstCombine.diff
+// EMIT_MIR remove_deref.opt_struct.RemoveDeref.diff
 fn opt_struct(s: S) -> u64 {
     let a = &s.a;
     let b = &s.b;
@@ -33,7 +33,7 @@ fn opt_struct(s: S) -> u64 {
     *b + x
 }
 
-// EMIT_MIR inst_combine_deref.dont_opt.InstCombine.diff
+// EMIT_MIR remove_deref.dont_opt.RemoveDeref.diff
 // do not optimize a sequence looking like this:
 // _1 = &_2;
 // _1 = _3;
@@ -49,7 +49,7 @@ fn dont_opt() -> u64 {
     0
 }
 
-// EMIT_MIR inst_combine_deref.do_not_miscompile.InstCombine.diff
+// EMIT_MIR remove_deref.do_not_miscompile.RemoveDeref.diff
 fn do_not_miscompile() {
     let x = 42;
     let a = 99;
