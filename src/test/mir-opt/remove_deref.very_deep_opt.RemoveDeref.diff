@@ -159,23 +159,32 @@
           StorageLive(_18);                // scope 17 at $DIR/remove_deref.rs:81:9: 81:11
           _18 = &_9;                       // scope 17 at $DIR/remove_deref.rs:81:14: 81:17
           StorageLive(_19);                // scope 18 at $DIR/remove_deref.rs:82:9: 82:11
-          _19 = (*_10);                    // scope 18 at $DIR/remove_deref.rs:82:14: 82:17
+-         _19 = (*_10);                    // scope 18 at $DIR/remove_deref.rs:82:14: 82:17
++         _19 = _1;                        // scope 18 at $DIR/remove_deref.rs:82:14: 82:17
           StorageLive(_20);                // scope 19 at $DIR/remove_deref.rs:83:9: 83:11
-          _20 = (*_11);                    // scope 19 at $DIR/remove_deref.rs:83:14: 83:17
+-         _20 = (*_11);                    // scope 19 at $DIR/remove_deref.rs:83:14: 83:17
++         _20 = _2;                        // scope 19 at $DIR/remove_deref.rs:83:14: 83:17
           StorageLive(_21);                // scope 20 at $DIR/remove_deref.rs:84:9: 84:11
-          _21 = (*_12);                    // scope 20 at $DIR/remove_deref.rs:84:14: 84:17
+-         _21 = (*_12);                    // scope 20 at $DIR/remove_deref.rs:84:14: 84:17
++         _21 = _3;                        // scope 20 at $DIR/remove_deref.rs:84:14: 84:17
           StorageLive(_22);                // scope 21 at $DIR/remove_deref.rs:85:9: 85:11
-          _22 = (*_13);                    // scope 21 at $DIR/remove_deref.rs:85:14: 85:17
+-         _22 = (*_13);                    // scope 21 at $DIR/remove_deref.rs:85:14: 85:17
++         _22 = _4;                        // scope 21 at $DIR/remove_deref.rs:85:14: 85:17
           StorageLive(_23);                // scope 22 at $DIR/remove_deref.rs:86:9: 86:11
-          _23 = (*_14);                    // scope 22 at $DIR/remove_deref.rs:86:14: 86:17
+-         _23 = (*_14);                    // scope 22 at $DIR/remove_deref.rs:86:14: 86:17
++         _23 = _5;                        // scope 22 at $DIR/remove_deref.rs:86:14: 86:17
           StorageLive(_24);                // scope 23 at $DIR/remove_deref.rs:87:9: 87:11
-          _24 = (*_15);                    // scope 23 at $DIR/remove_deref.rs:87:14: 87:17
+-         _24 = (*_15);                    // scope 23 at $DIR/remove_deref.rs:87:14: 87:17
++         _24 = _6;                        // scope 23 at $DIR/remove_deref.rs:87:14: 87:17
           StorageLive(_25);                // scope 24 at $DIR/remove_deref.rs:88:9: 88:11
-          _25 = (*_16);                    // scope 24 at $DIR/remove_deref.rs:88:14: 88:17
+-         _25 = (*_16);                    // scope 24 at $DIR/remove_deref.rs:88:14: 88:17
++         _25 = _7;                        // scope 24 at $DIR/remove_deref.rs:88:14: 88:17
           StorageLive(_26);                // scope 25 at $DIR/remove_deref.rs:89:9: 89:11
-          _26 = (*_17);                    // scope 25 at $DIR/remove_deref.rs:89:14: 89:17
+-         _26 = (*_17);                    // scope 25 at $DIR/remove_deref.rs:89:14: 89:17
++         _26 = _8;                        // scope 25 at $DIR/remove_deref.rs:89:14: 89:17
           StorageLive(_27);                // scope 26 at $DIR/remove_deref.rs:90:9: 90:11
-          _27 = (*_18);                    // scope 26 at $DIR/remove_deref.rs:90:14: 90:17
+-         _27 = (*_18);                    // scope 26 at $DIR/remove_deref.rs:90:14: 90:17
++         _27 = _9;                        // scope 26 at $DIR/remove_deref.rs:90:14: 90:17
           StorageLive(_28);                // scope 27 at $DIR/remove_deref.rs:91:6: 91:8
           _28 = _19;                       // scope 27 at $DIR/remove_deref.rs:91:6: 91:8
           StorageLive(_29);                // scope 27 at $DIR/remove_deref.rs:91:10: 91:12
