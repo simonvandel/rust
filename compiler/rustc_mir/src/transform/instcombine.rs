@@ -167,10 +167,18 @@ impl OptimizationFinder<'b, 'tcx> {
                                     return None;
                                 }
 
-                                self.optimizations
-                                    .unneeded_deref
-                                    .insert(location, *place_taken_address_of);
-                                return Some(());
+                                if place_derefs_non_mutable_ref(
+                                    place_taken_address_of,
+                                    self.body,
+                                    self.tcx,
+                                ) {
+                                    self.optimizations
+                                        .unneeded_deref
+                                        .insert(location, *place_taken_address_of);
+                                    return Some(());
+                                }
+
+                                return None;
                             }
 
                             // We found an assignment of `local_being_deref` that is not an immutable ref, e.g the following sequence
@@ -258,17 +266,29 @@ impl OptimizationFinder<'b, 'tcx> {
     }
 }
 
+/// Returns whether this place derefences a type `&_`
+fn place_derefs_non_mutable_ref<'tcx>(
+    place: &Place<'tcx>,
+    body: &Body<'tcx>,
+    tcx: TyCtxt<'tcx>,
+) -> bool {
+    if let PlaceRef { local, projection: &[ref proj_base @ .., ProjectionElem::Deref] } =
+        place.as_ref()
+    {
+        let ty = Place::ty_from(local, proj_base, body, tcx).ty;
+        // The dereferenced place must have type `&_`.
+        if let ty::Ref(_, _, Mutability::Not) = ty.kind() {
+            return true;
+        }
+    }
+    return false;
+}
+
 impl Visitor<'tcx> for OptimizationFinder<'b, 'tcx> {
     fn visit_rvalue(&mut self, rvalue: &Rvalue<'tcx>, location: Location) {
         if let Rvalue::Ref(_, _, place) = rvalue {
-            if let PlaceRef { local, projection: &[ref proj_base @ .., ProjectionElem::Deref] } =
-                place.as_ref()
-            {
-                // The dereferenced place must have type `&_`.
-                let ty = Place::ty_from(local, proj_base, self.body, self.tcx).ty;
-                if let ty::Ref(_, _, Mutability::Not) = ty.kind() {
-                    self.optimizations.and_stars.insert(location);
-                }
+            if place_derefs_non_mutable_ref(place, self.body, self.tcx) {
+                self.optimizations.and_stars.insert(location);
             }
         }
 
