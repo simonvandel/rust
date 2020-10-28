@@ -7,7 +7,7 @@ use rustc_index::vec::Idx;
 use rustc_middle::mir::{
     visit::PlaceContext,
     visit::{MutVisitor, Visitor},
-    Statement,
+    BasicBlock, BasicBlockData, Statement,
 };
 use rustc_middle::mir::{
     BinOp, Body, BorrowKind, Constant, Local, Location, Operand, Place, PlaceRef, ProjectionElem,
@@ -90,7 +90,7 @@ struct MutatingUseVisitor {
     local_to_look_for: Local,
 }
 
-impl MutatingUseVisitor {
+impl<'tcx> MutatingUseVisitor {
     fn has_mutating_use_in_stmt(local: Local, stmt: &Statement<'tcx>, location: Location) -> bool {
         let mut _self = Self { has_mutating_use: false, local_to_look_for: local };
         _self.visit_statement(stmt, location);
@@ -100,8 +100,13 @@ impl MutatingUseVisitor {
 
 impl<'tcx> Visitor<'tcx> for MutatingUseVisitor {
     fn visit_local(&mut self, local: &Local, context: PlaceContext, _: Location) {
+        // TODO reverse this so that the visitor takes in the potentials, and updates removes when it finds mutating
         if *local == self.local_to_look_for {
-            self.has_mutating_use |= context.is_mutating_use();
+            let is_dead = matches!(
+                context,
+                PlaceContext::NonUse(rustc_middle::mir::visit::NonUseContext::StorageDead)
+            );
+            self.has_mutating_use |= context.is_mutating_use() || is_dead;
         }
     }
 }
@@ -111,116 +116,114 @@ struct OptimizationFinder<'b, 'tcx> {
     body: &'b Body<'tcx>,
     tcx: TyCtxt<'tcx>,
     optimizations: OptimizationList<'tcx>,
+    // Locals within the currently analysed basic block where this optimization potentially applies.
+    // This list is updated as statements are visited.
+    // Option<Local> is used to make it easy to iterate a local mutably
+    // and "remove" it as a potential by setting it to None.
+    locals_with_potential: Vec<Option<(Local, Place<'tcx>)>>,
 }
 
 impl OptimizationFinder<'b, 'tcx> {
     fn new(body: &'b Body<'tcx>, tcx: TyCtxt<'tcx>) -> OptimizationFinder<'b, 'tcx> {
-        OptimizationFinder { body, tcx, optimizations: OptimizationList::default() }
+        OptimizationFinder {
+            body,
+            tcx,
+            optimizations: OptimizationList::default(),
+            locals_with_potential: vec![],
+        }
+    }
+    /// Removes locals from the list of potential if they are used in a way that would cause misoptimization
+    fn ensure_potentials_are_valid(&mut self, statement: &Statement<'tcx>, location: Location) {
+        for local in self.locals_with_potential.iter_mut().filter(|x| x.is_some()) {
+            debug!(
+                "Checking if local {:?} is in mutating use in statement {:?}",
+                local.unwrap(),
+                statement
+            );
+            if MutatingUseVisitor::has_mutating_use_in_stmt(local.unwrap().0, statement, location)
+                || MutatingUseVisitor::has_mutating_use_in_stmt(
+                    local.unwrap().1.local,
+                    statement,
+                    location,
+                )
+            {
+                debug!(
+                    "Potential local {:?} is in mutating use in statement {:?}, so disqualifying it",
+                    local.unwrap(),
+                    statement
+                );
+                *local = None;
+            }
+        }
     }
 
-    fn find_deref_of_address(&mut self, rvalue: &Rvalue<'tcx>, location: Location) -> Option<()> {
+    fn find_deref_of_address(&mut self, statement: &Statement<'tcx>, location: Location) {
         // FIXME(#78192): This optimization can result in unsoundness.
         if !self.tcx.sess.opts.debugging_opts.unsound_mir_opts {
-            return None;
+            return;
         }
 
-        // Look for the sequence
-        //
-        // _2 = &_1;
-        // ...
-        // _5 = (*_2);
-        //
-        // which we can replace the last statement with `_5 = _1;` to avoid the load of `_2`.
-        if let Rvalue::Use(op) = rvalue {
-            let local_being_derefed = match op.place()?.as_ref() {
-                PlaceRef { local, projection: [ProjectionElem::Deref] } => Some(local),
-                _ => None,
-            }?;
-
-            let mut dead_locals_seen = vec![];
-
-            let stmt_index = location.statement_index;
-            // Look behind for statement that assigns the local from a address of operator.
-            // 6 is chosen as a heuristic determined by seeing the number of times
-            // the optimization kicked in compiling rust std.
-            let lower_index = stmt_index.saturating_sub(6);
-            let statements_to_look_in = self.body.basic_blocks()[location.block].statements
-                [lower_index..stmt_index]
-                .iter()
-                .rev();
-            for stmt in statements_to_look_in {
-                match &stmt.kind {
-                    // Exhaustive match on statements to detect conditions that warrant we bail out of the optimization.
-                    rustc_middle::mir::StatementKind::Assign(box (l, r))
-                        if l.local == local_being_derefed =>
-                    {
-                        match r {
-                            // Looking for immutable reference e.g _local_being_deref = &_1;
-                            Rvalue::Ref(
-                                _,
-                                // Only apply the optimization if it is an immutable borrow.
-                                BorrowKind::Shared,
-                                place_taken_address_of,
-                            ) => {
-                                // Make sure that the place has not been marked dead
-                                if dead_locals_seen.contains(&place_taken_address_of.local) {
-                                    return None;
+        match &statement.kind {
+            rustc_middle::mir::StatementKind::Assign(box (l, r)) => {
+                match r {
+                    // Looking for immutable reference e.g _local_being_deref = &_1;
+                    Rvalue::Ref(
+                        _,
+                        // Only apply the optimization if it is an immutable borrow.
+                        BorrowKind::Shared,
+                        place_ref,
+                    ) => {
+                        self.locals_with_potential.push(Some((l.local, *place_ref)));
+                        // we found a potential in this statement, so we are done in this statement
+                        return;
+                    }
+                    Rvalue::Use(op) => {
+                        // Looking for _5 = (*_2);
+                        if let Some(place_being_derefed) = op.place() {
+                            match place_being_derefed.as_ref() {
+                                PlaceRef { projection: [ProjectionElem::Deref], .. } => {
+                                    if let Some(to_optimize) = self
+                                        .locals_with_potential
+                                        .iter_mut()
+                                        .filter_map(|x| *x)
+                                        .find(|x| x.0 == place_being_derefed.local)
+                                    {
+                                        // We found a local that is optimizable!
+                                        self.optimizations
+                                            .unneeded_deref
+                                            .insert(location, to_optimize.1);
+                                        return;
+                                    }
                                 }
-
-                                if place_derefs_non_mutable_ref(
-                                    place_taken_address_of,
-                                    self.body,
-                                    self.tcx,
-                                ) {
-                                    self.optimizations
-                                        .unneeded_deref
-                                        .insert(location, *place_taken_address_of);
-                                    return Some(());
-                                }
-
-                                return None;
+                                // We didn't find the local that is optimizable,
+                                // so we need to ensure that all potentials are still valid
+                                _ => self.ensure_potentials_are_valid(statement, location),
                             }
-
-                            // We found an assignment of `local_being_deref` that is not an immutable ref, e.g the following sequence
-                            // _2 = &_1;
-                            // _3 = &5
-                            // _2 = _3;  <-- this means it is no longer valid to replace the last statement with `_5 = _1;`
-                            // _5 = (*_2);
-                            _ => return None,
                         }
                     }
-
-                    // Inline asm can do anything, so bail out of the optimization.
-                    rustc_middle::mir::StatementKind::LlvmInlineAsm(_) => return None,
-
-                    // Remember `StorageDead`s, as the local being marked dead could be the
-                    // place RHS we are looking for, in which case we need to abort to avoid UB
-                    // using an uninitialized place
-                    rustc_middle::mir::StatementKind::StorageDead(dead) => {
-                        dead_locals_seen.push(*dead)
-                    }
-
-                    // Check that `local_being_deref` is not being used in a mutating way which can cause misoptimization.
-                    rustc_middle::mir::StatementKind::Assign(box (_, _))
-                    | rustc_middle::mir::StatementKind::Coverage(_)
-                    | rustc_middle::mir::StatementKind::Nop
-                    | rustc_middle::mir::StatementKind::FakeRead(_, _)
-                    | rustc_middle::mir::StatementKind::StorageLive(_)
-                    | rustc_middle::mir::StatementKind::Retag(_, _)
-                    | rustc_middle::mir::StatementKind::AscribeUserType(_, _)
-                    | rustc_middle::mir::StatementKind::SetDiscriminant { .. } => {
-                        if MutatingUseVisitor::has_mutating_use_in_stmt(
-                            local_being_derefed,
-                            stmt,
-                            location,
-                        ) {
-                            return None;
-                        }
+                    // check that all other uses of Assign do not cause issues for the potentials
+                    _ => {
+                        self.ensure_potentials_are_valid(statement, location);
                     }
                 }
             }
+
+            // Inline asm can do anything, so clear all potential.
+            rustc_middle::mir::StatementKind::LlvmInlineAsm(_) => {
+                self.locals_with_potential.clear()
+            }
+
+            rustc_middle::mir::StatementKind::Coverage(_)
+            | rustc_middle::mir::StatementKind::Nop
+            | rustc_middle::mir::StatementKind::FakeRead(_, _)
+            | rustc_middle::mir::StatementKind::StorageLive(_)
+            | rustc_middle::mir::StatementKind::StorageDead(_)
+            | rustc_middle::mir::StatementKind::Retag(_, _)
+            | rustc_middle::mir::StatementKind::AscribeUserType(_, _)
+            | rustc_middle::mir::StatementKind::SetDiscriminant { .. } => {
+                self.ensure_potentials_are_valid(statement, location)
+            }
         }
-        Some(())
     }
 
     fn find_unneeded_equality_comparison(&mut self, rvalue: &Rvalue<'tcx>, location: Location) {
@@ -285,6 +288,16 @@ fn place_derefs_non_mutable_ref<'tcx>(
 }
 
 impl Visitor<'tcx> for OptimizationFinder<'b, 'tcx> {
+    fn visit_basic_block_data(&mut self, block: BasicBlock, data: &BasicBlockData<'tcx>) {
+        self.locals_with_potential.clear();
+        self.super_basic_block_data(block, data);
+    }
+
+    fn visit_statement(&mut self, statement: &Statement<'tcx>, location: Location) {
+        self.find_deref_of_address(statement, location);
+        self.super_statement(statement, location);
+    }
+
     fn visit_rvalue(&mut self, rvalue: &Rvalue<'tcx>, location: Location) {
         if let Rvalue::Ref(_, _, place) = rvalue {
             if place_derefs_non_mutable_ref(place, self.body, self.tcx) {
@@ -300,8 +313,6 @@ impl Visitor<'tcx> for OptimizationFinder<'b, 'tcx> {
                 self.optimizations.arrays_lengths.insert(location, constant);
             }
         }
-
-        let _ = self.find_deref_of_address(rvalue, location);
 
         self.find_unneeded_equality_comparison(rvalue, location);
 
