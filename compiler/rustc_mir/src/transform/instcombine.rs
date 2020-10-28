@@ -1,14 +1,16 @@
 //! Performs various peephole optimizations.
 
+use crate::dataflow::Analysis;
 use crate::transform::MirPass;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir::Mutability;
 use rustc_index::vec::Idx;
 use rustc_middle::mir::{
     visit::PlaceContext,
-    visit::{MutVisitor, Visitor},
+    visit::{MutVisitor, NonUseContext, Visitor},
     BasicBlock, BasicBlockData, Statement,
 };
+
 use rustc_middle::mir::{
     BinOp, Body, BorrowKind, Constant, Local, Location, Operand, Place, PlaceRef, ProjectionElem,
     Rvalue,
@@ -16,10 +18,141 @@ use rustc_middle::mir::{
 use rustc_middle::ty::{self, TyCtxt};
 use std::mem;
 
+//////////////////////////////////////
+use rustc_index::bit_set::BitSet;
+use rustc_middle::mir::{self};
+
+use crate::dataflow::{AnalysisDomain, Forward, GenKill, GenKillAnalysis};
+
+pub struct AvailableLocals;
+
+impl AvailableLocals {
+    fn transfer_function<T>(&self, trans: &'a mut T) -> TransferFunction<'a, T> {
+        TransferFunction(trans)
+    }
+}
+
+impl AnalysisDomain<'tcx> for AvailableLocals {
+    type Domain = BitSet<Local>;
+    type Direction = Forward;
+
+    const NAME: &'static str = "available_locals";
+
+    fn bottom_value(&self, body: &mir::Body<'tcx>) -> Self::Domain {
+        // bottom = nothing available
+        BitSet::new_empty(body.local_decls.len())
+    }
+
+    fn initialize_start_block(&self, _: &mir::Body<'tcx>, _: &mut Self::Domain) {
+        // No variables are available until we observe an assignment
+    }
+}
+
+impl GenKillAnalysis<'tcx> for AvailableLocals {
+    type Idx = Local;
+
+    fn statement_effect(
+        &self,
+        trans: &mut impl GenKill<Self::Idx>,
+        statement: &mir::Statement<'tcx>,
+        location: Location,
+    ) {
+        self.transfer_function(trans).visit_statement(statement, location);
+    }
+
+    fn terminator_effect(
+        &self,
+        trans: &mut impl GenKill<Self::Idx>,
+        terminator: &mir::Terminator<'tcx>,
+        location: Location,
+    ) {
+        self.transfer_function(trans).visit_terminator(terminator, location);
+    }
+
+    fn call_return_effect(
+        &self,
+        _trans: &mut impl GenKill<Self::Idx>,
+        _block: mir::BasicBlock,
+        _func: &mir::Operand<'tcx>,
+        _args: &[mir::Operand<'tcx>],
+        _dest_place: mir::Place<'tcx>,
+    ) {
+    }
+}
+
+// #[derive(Hash, Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+// pub struct StatementIndexInBody(usize);
+
+// impl StatementIndexInBody {
+//     fn from_location(location: Location) -> Self {
+//         Self(
+//             location.block.index() * location.statement_index.index()
+//                 + location.statement_index.index(),
+//         )
+//     }
+// }
+
+// impl Idx for StatementIndexInBody {
+//     fn new(idx: usize) -> Self {
+//         Self(idx)
+//     }
+
+//     fn index(self) -> usize {
+//         self.0
+//     }
+// }
+
+// impl<C> DebugWithContext<C> for StatementIndexInBody {}
+
+struct TransferFunction<'a, T>(&'a mut T);
+
+impl<'tcx, T> Visitor<'tcx> for TransferFunction<'_, T>
+where
+    T: GenKill<Local>,
+{
+    fn visit_assign(&mut self, _place: &Place<'tcx>, _rvalue: &Rvalue<'tcx>, _location: Location) {
+        // simple: get local from rvalue
+
+        // kill_first(|x|x.local == place.local)
+        // self.0.kill(elem)
+        if let Some(local) = _place.as_local() {
+            self.0.gen(local);
+            self.0.kill(local);
+        }
+    }
+
+    fn visit_local(&mut self, local: &Local, _context: PlaceContext, _location: Location) {
+        let is_dead = matches!(_context, PlaceContext::NonUse(NonUseContext::StorageDead));
+        if _context.is_mutating_use() || is_dead {
+            self.0.kill(*local);
+        }
+    }
+}
+
+// fn get_local<'tcx>(rvalue: &Rvalue<'tcx>) -> Local {
+//     match rvalue.
+// }
+
+//////////////////////////////
+
 pub struct InstCombine;
 
 impl<'tcx> MirPass<'tcx> for InstCombine {
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
+        // TODO make results visitor
+        let mut results =
+            AvailableLocals.into_engine(tcx, body).iterate_to_fixpoint().into_results_cursor(body);
+
+        // Inspect the fixpoint state immediately before each `Drop` terminator.
+        for (bb, block) in body.basic_blocks().iter_enumerated() {
+            for (stmt_idx, stmt) in block.statements.iter().enumerate() {
+                results
+                    .seek_before_primary_effect(Location { block: bb, statement_index: stmt_idx });
+                let state = results.get();
+                debug!("state: {:?} before statement {:?}", state, stmt);
+            }
+        }
+
         // First, find optimization opportunities. This is done in a pre-pass to keep the MIR
         // read-only so that we can do global analyses on the MIR in the process (e.g.
         // `Place::ty()`).
