@@ -1898,7 +1898,7 @@ pub struct SourceScopeLocalData {
 
 /// These are values that can appear inside an rvalue. They are intentionally
 /// limited to prevent rvalues from being nested in one another.
-#[derive(Clone, PartialEq, TyEncodable, TyDecodable, HashStable)]
+#[derive(Clone, PartialEq, Eq, TyEncodable, TyDecodable, HashStable)]
 pub enum Operand<'tcx> {
     /// Copy: The value must be available for use afterwards.
     ///
@@ -2006,7 +2006,7 @@ impl<'tcx> Operand<'tcx> {
 ///////////////////////////////////////////////////////////////////////////
 /// Rvalues
 
-#[derive(Clone, TyEncodable, TyDecodable, HashStable, PartialEq)]
+#[derive(Clone, TyEncodable, TyDecodable, HashStable, PartialEq, Eq)]
 pub enum Rvalue<'tcx> {
     /// x (either a move or copy, depending on type of x)
     Use(Operand<'tcx>),
@@ -2298,7 +2298,7 @@ impl<'tcx> Debug for Rvalue<'tcx> {
 /// this does not necessarily mean that they are `==` in Rust. In
 /// particular, one must be wary of `NaN`!
 
-#[derive(Clone, Copy, PartialEq, TyEncodable, TyDecodable, HashStable)]
+#[derive(Clone, Copy, PartialEq, Eq, TyEncodable, TyDecodable, HashStable)]
 pub struct Constant<'tcx> {
     pub span: Span,
 
@@ -2419,7 +2419,7 @@ impl<'tcx> UserTypeProjections {
 
 /// Encodes the effect of a user-supplied type annotation on the
 /// subcomponents of a pattern. The effect is determined by applying the
-/// given list of proejctions to some underlying base type. Often,
+/// given list of projections to some underlying base type. Often,
 /// the projection element list `projs` is empty, in which case this
 /// directly encodes a type in `base`. But in the case of complex patterns with
 /// subpatterns and bindings, we want to apply only a *part* of the type to a variable,

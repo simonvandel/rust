@@ -38,6 +38,9 @@
 //! [Hasse diagram]: https://en.wikipedia.org/wiki/Hasse_diagram
 //! [poset]: https://en.wikipedia.org/wiki/Partially_ordered_set
 
+use std::{collections::hash_map::Entry, hash::Hash};
+
+use rustc_data_structures::fx::FxHashMap;
 use rustc_index::bit_set::BitSet;
 use rustc_index::vec::{Idx, IndexVec};
 
@@ -141,6 +144,27 @@ impl<T: Idx> JoinSemiLattice for BitSet<T> {
 impl<T: Idx> MeetSemiLattice for BitSet<T> {
     fn meet(&mut self, other: &Self) -> bool {
         self.intersect(other)
+    }
+}
+
+impl<K, T> JoinSemiLattice for FxHashMap<K, T>
+where
+    T: Eq + Clone,
+    K: Eq + Hash + Clone,
+{
+    fn join(&mut self, other: &Self) -> bool {
+        let before = self.len();
+        // perform union with other
+        for (k, v) in other {
+            match self.entry(k.clone()) {
+                Entry::Occupied(_) => {}
+                Entry::Vacant(va) => {
+                    va.insert(v.clone());
+                }
+            };
+        }
+        let after = self.len();
+        before != after
     }
 }
 

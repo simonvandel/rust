@@ -1,9 +1,13 @@
 //! Custom formatting traits used when outputting Graphviz diagrams with the results of a dataflow
 //! analysis.
 
+use rustc_data_structures::fx::FxHashMap;
 use rustc_index::bit_set::{BitSet, HybridBitSet};
 use rustc_index::vec::Idx;
-use std::fmt;
+use std::{
+    fmt::{self, Debug},
+    hash::Hash,
+};
 
 /// An extension to `fmt::Debug` for data that can be better printed with some auxiliary data `C`.
 pub trait DebugWithContext<C>: Eq + fmt::Debug {
@@ -69,6 +73,10 @@ where
 }
 
 // Impls
+impl<C, K: Debug + std::cmp::Eq + Hash, T: Debug + std::cmp::Eq> DebugWithContext<C>
+    for FxHashMap<K, T>
+{
+}
 
 impl<T, C> DebugWithContext<C> for BitSet<T>
 where
